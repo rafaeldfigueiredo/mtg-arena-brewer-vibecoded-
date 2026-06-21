@@ -1,16 +1,16 @@
 {
-  "name": "arena-brawl-builder-root",
+  "name": "historic-brawl-brewmaster-next",
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "install-all": "npm install && npm run install-server && npm run install-client",
-    "install-server": "cd server && npm install",
-    "install-client": "cd client && npm install",
-    "server": "cd server && node app.js",
-    "client": "cd client && npm run dev",
-    "dev": "npx concurrently \"npm run server\" \"npm run client\""
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
   },
-  "devDependencies": {
-    "concurrently": "^10.0.3"
+  "dependencies": {
+    "axios": "^1.6.0",
+    "next": "^14.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   }
 }
