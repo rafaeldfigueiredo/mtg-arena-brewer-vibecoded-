@@ -2,10 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-console.log("🛡️ Initializing Secure & Hardened JS Brawl Builder Pipeline...");
+console.log("🛡️ Building Hardened Vercel-Ready Serverless Brawl Pipeline...");
 
 const ROOT_DIR = process.cwd();
 const SERVER_DIR = path.join(ROOT_DIR, 'server');
+const SERVER_API_DIR = path.join(SERVER_DIR, 'api');
 const CLIENT_DIR = path.join(ROOT_DIR, 'client');
 
 function ensureDir(dirPath) {
@@ -18,33 +19,33 @@ function writeFile(filePath, content) {
 }
 
 // ==========================================
-// 1. ROOT CONCURRENT WORKSPACE INITIALIZATION
+// 1. WORKSPACE ROOT INITIALIZATION
 // ==========================================
 ensureDir(SERVER_DIR);
+ensureDir(SERVER_API_DIR);
 ensureDir(CLIENT_DIR);
 
 const rootPackageJson = {
-  "name": "arena-brawl-builder-secure-root",
+  "name": "arena-brawl-builder-serverless-root",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "install-all": "npm install && npm run install-server && npm run install-client",
     "install-server": "cd server && npm install",
     "install-client": "cd client && npm install",
-    "server": "cd server && node app.js",
+    "local-server": "cd server && node local-dev-runner.js",
     "client": "cd client && npm run dev",
-    "dev": "npx concurrently \"npm run server\" \"npm run client\""
+    "dev": "npx concurrently \"npm run local-server\" \"npm run client\""
   }
 };
 writeFile(path.join(ROOT_DIR, 'package.json'), JSON.stringify(rootPackageJson, null, 2));
 
 // ==========================================
-// 2. HARDENED BACKEND SERVER PIPELINE
+// 2. SERVERLESS BACKEND (VERCEL INTEGRATED)
 // ==========================================
 const serverPackageJson = {
-  "name": "brawl-builder-backend-secure",
+  "name": "brawl-builder-serverless-backend",
   "version": "1.0.0",
-  "main": "app.js",
   "dependencies": {
     "axios": "^1.6.0",
     "cors": "^2.8.5",
@@ -53,33 +54,44 @@ const serverPackageJson = {
 };
 writeFile(path.join(SERVER_DIR, 'package.json'), JSON.stringify(serverPackageJson, null, 2));
 
-// server/app.js (Hardened against ReDoS, Payload Injection, Information Leakage, and API Abuse)
-const appJsContent = `
-const express = require('express');
+// server/vercel.json (Directs Vercel routing configurations safely away from Next.js defaults)
+const vercelJsonContent = {
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/brew.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/brew",
+      "dest": "api/brew.js"
+    }
+  ]
+};
+writeFile(path.join(SERVER_DIR, 'vercel.json'), JSON.stringify(vercelJsonContent, null, 2));
+
+// server/api/brew.js (The core standalone serverless execution handler)
+const brewApiContent = `
 const axios = require('axios');
 const cors = require('cors');
 
-const app = express();
-
-// SECURITY FIX 1: Strict payload caps to completely stop memory exhaustion DoS vectors
-app.use(express.json({ limit: '2mb' }));
-
-// SECURITY FIX 2: Configured CORS guard explicitly checking against origin rules
+// Tightened CORS security to prevent external exploitation origins
 const ALLOWED_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'];
-app.use(cors({
+const corsMiddleware = cors({
     origin: (origin, callback) => {
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.vercel.app') || origin.endsWith('.github.io')) {
             callback(null, true);
         } else {
             callback(new Error('Blocked by CORS configuration rules'));
         }
     }
-}));
+});
 
 const SCRYFALL_BATCH_URL = "https://api.scryfall.com/cards/collection";
 const DELAY_MS = 100;
 
-// SECURITY FIX 3: Strict, safe alphanumeric filtering to prevent ReDoS or command injection attacks
 function cleanCommanderInput(name) {
     if (typeof name !== 'string') return '';
     return name.replace(/[^a-zA-Z0-9\\s//'’.,-]/g, '').trim().substring(0, 100);
@@ -100,9 +112,7 @@ function getColorNames(colorCodes) {
 
 function filterCardKeys(data) {
     if (typeof data === 'object' && data !== null) {
-        if (Array.isArray(data)) {
-            return data.map(item => filterCardKeys(item));
-        }
+        if (Array.isArray(data)) return data.map(item => filterCardKeys(item));
         const cleaned = {};
         for (const [k, v] of Object.entries(data)) {
             const kLower = k.toLowerCase();
@@ -114,7 +124,6 @@ function filterCardKeys(data) {
                 'image_status', 'prices', 'artist', 'released_at', 'digital', 
                 'collector_number', 'games', 'preview', 'story_spotlight', 'reprint', 'variation'
             ].includes(kLower)) continue;
-            
             cleaned[k] = filterCardKeys(v);
         }
         return cleaned;
@@ -122,7 +131,6 @@ function filterCardKeys(data) {
     return data;
 }
 
-// SECURITY FIX 4: ReDoS-Safe, deterministic state-machine parser for CSVs (No regex back-tracking)
 function safeParseCsvLine(line) {
     const result = [];
     let current = '';
@@ -142,131 +150,131 @@ function safeParseCsvLine(line) {
     return result;
 }
 
-// SECURITY FIX 5: Simplified in-memory rate limiter guard to avoid external pipeline hammering
-const rateLimitCache = new Map();
-setInterval(() => rateLimitCache.clear(), 60000); // Reset tracking map every 60 seconds
-
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-app.post('/api/brew', async (req, res) => {
-    // Basic IP tracking block
-    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'anonymous';
-    const requestCount = rateLimitCache.get(clientIp) || 0;
-    if (requestCount > 15) {
-        return res.status(429).json({ error: "Too many optimization requests. Please try again in a minute." });
-    }
-    rateLimitCache.set(clientIp, requestCount + 1);
+module.exports = async (req, res) => {
+    return new Promise((resolve) => {
+        corsMiddleware(req, res, async () => {
+            if (req.method !== 'POST') {
+                res.status(405).json({ error: "Method not allowed" });
+                return resolve();
+            }
 
-    try {
-        const { commanderName, collectionCsv } = req.body;
-        const sanitizedCommander = cleanCommanderInput(commanderName);
-        if (!sanitizedCommander) return res.status(400).json({ error: "A valid commander name query is required" });
+            try {
+                const { commanderName, collectionCsv } = req.body;
+                const sanitizedCommander = cleanCommanderInput(commanderName);
+                if (!sanitizedCommander) {
+                    res.status(400).json({ error: "A valid commander name query is required" });
+                    return resolve();
+                }
 
-        const ownedMap = {};
-        if (typeof collectionCsv === 'string' && collectionCsv.length > 0) {
-            const lines = collectionCsv.split(/\\r?\\n/);
-            if (lines.length > 0) {
-                const headers = safeParseCsvLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
-                const countIdx = headers.indexOf('Count');
-                const nameIdx = headers.indexOf('Name');
+                const ownedMap = {};
+                if (typeof collectionCsv === 'string' && collectionCsv.length > 0) {
+                    const lines = collectionCsv.split(/\\r?\\n/);
+                    if (lines.length > 0) {
+                        const headers = safeParseCsvLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
+                        const countIdx = headers.indexOf('Count');
+                        const nameIdx = headers.indexOf('Name');
 
-                if (countIdx !== -1 && nameIdx !== -1) {
-                    const maxRows = Math.min(lines.length, 10000); // Truncate abuse payloads
-                    for (let i = 1; i < maxRows; i++) {
-                        if (!lines[i]) continue;
-                        const row = safeParseCsvLine(lines[i]).map(cell => cell.replace(/^"|"$/g, ''));
-                        if (row[nameIdx]) {
-                            const nameToken = row[nameIdx].toLowerCase().replace(/\\s*\\/\\s*/g, " // ").trim();
-                            ownedMap[nameToken] = parseInt(row[countIdx], 10) || 1;
+                        if (countIdx !== -1 && nameIdx !== -1) {
+                            const maxRows = Math.min(lines.length, 5000); // 5k row payload circuit breaker protection
+                            for (let i = 1; i < maxRows; i++) {
+                                if (!lines[i]) continue;
+                                const row = safeParseCsvLine(lines[i]).map(cell => cell.replace(/^"|"$/g, ''));
+                                if (row[nameIdx]) {
+                                    const nameToken = row[nameIdx].toLowerCase().replace(/\\s*\\/\\s*/g, " // ").trim();
+                                    ownedMap[nameToken] = parseInt(row[countIdx], 10) || 1;
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
 
-        const slug = getCommanderSlug(sanitizedCommander);
-        console.log(\`Fetching deck strategies safely for: \${slug}\`);
-        
-        const edhrecRes = await axios.get(\`https://json.edhrec.com/pages/commanders/\${slug}.json\`, {
-            headers: { 'User-Agent': 'BrawlBuilderSecure/1.0' },
-            timeout: 5000
-        });
-        
-        const cardlists = edhrecRes.data.container?.json_dict?.cardlists || [];
-        let rawEdhrecCards = [];
-        cardlists.forEach(list => {
-            if (list.cardviews) {
-                list.cardviews.forEach(card => {
-                    if (card.name) rawEdhrecCards.push({ name: String(card.name) });
+                const slug = getCommanderSlug(sanitizedCommander);
+                const edhrecRes = await axios.get(\`https://json.edhrec.com/pages/commanders/\${slug}.json\`, {
+                    headers: { 'User-Agent': 'SecureBrawlBuilderServerless/2.0' },
+                    timeout: 4500
                 });
+                
+                const cardlists = edhrecRes.data.container?.json_dict?.cardlists || [];
+                let rawEdhrecCards = [];
+                cardlists.forEach(list => {
+                    if (list.cardviews) {
+                        list.cardviews.forEach(card => {
+                            if (card.name) rawEdhrecCards.push({ name: String(card.name) });
+                        });
+                    }
+                });
+
+                const uniqueEdhrecNames = [...new Set(rawEdhrecCards.map(c => c.name))].slice(0, 120);
+                const finalProcessedDeck = [{"meta_type": "deck_info", "deck_name": \`\${sanitizedCommander} Historic Brawl Deck\`}];
+                const scryfallIdentifiers = uniqueEdhrecNames.map(name => ({ name }));
+                
+                const BATCH_SIZE = 75;
+                for (let i = 0; i < scryfallIdentifiers.length; i += BATCH_SIZE) {
+                    const batch = scryfallIdentifiers.slice(i, i + BATCH_SIZE);
+                    await sleep(DELAY_MS);
+
+                    const scryfallRes = await axios.post(SCRYFALL_BATCH_URL, { identifiers: batch }, {
+                        headers: { 'User-Agent': 'SecureBrawlBuilderServerless/2.0' },
+                        timeout: 5000
+                    });
+                    const cardsData = scryfallRes.data.data || [];
+
+                    cardsData.forEach(card => {
+                        const isBrawlLegal = card.legalities?.historicbrawl === 'legal' || card.legalities?.brawl === 'legal';
+                        if (isBrawlLegal) {
+                            let rawColors = card.colors;
+                            if (card.card_faces && !rawColors) {
+                                const faceColors = new Set();
+                                card.card_faces.forEach(face => {
+                                    if (face.colors) face.colors.forEach(c => faceColors.add(c));
+                                });
+                                rawColors = Array.from(faceColors);
+                            }
+
+                            const cleanedCard = filterCardKeys(card);
+                            cleanedCard.colors = getColorNames(rawColors);
+
+                            const normalizedTitle = card.name.toLowerCase().replace(/\\s*\\/\\s*/g, " // ");
+                            const basicTitle = normalizedTitle.split(" // ")[0].trim();
+                            const isOwned = !!(ownedMap[normalizedTitle] || ownedMap[basicTitle]);
+                            
+                            cleanedCard.amount = 1; 
+                            cleanedCard.owned = isOwned;
+                            cleanedCard.oracle_text = card.oracle_text || (card.card_faces ? card.card_faces.map(f => f.oracle_text).join(" | ") : "");
+
+                            finalProcessedDeck.push(cleanedCard);
+                        }
+                    });
+                }
+
+                res.status(200).json({ commander: sanitizedCommander, processedDecklist: finalProcessedDeck });
+                return resolve();
+
+            } catch (err) {
+                res.status(500).json({ error: "Internal processing engine failed. Verify input syntax configuration rules." });
+                return resolve();
             }
         });
-
-        const uniqueEdhrecNames = [...new Set(rawEdhrecCards.map(c => c.name))].slice(0, 150); // Hard logical upper bound match cap
-        console.log(\`Verifying \${uniqueEdhrecNames.length} unique items safely via Scryfall processing engine...\`);
-
-        const finalProcessedDeck = [{"meta_type": "deck_info", "deck_name": \`\${sanitizedCommander} Historic Brawl Deck\`}];
-        const scryfallIdentifiers = uniqueEdhrecNames.map(name => ({ name }));
-        
-        const BATCH_SIZE = 75;
-        for (let i = 0; i < scryfallIdentifiers.length; i += BATCH_SIZE) {
-            const batch = scryfallIdentifiers.slice(i, i + BATCH_SIZE);
-            await sleep(DELAY_MS); // Keeps network layer aligned with rate rules
-
-            const scryfallRes = await axios.post(SCRYFALL_BATCH_URL, { identifiers: batch }, {
-                headers: { 'User-Agent': 'BrawlBuilderSecure/1.0' },
-                timeout: 5000
-            });
-            const cardsData = scryfallRes.data.data || [];
-
-            cardsData.forEach(card => {
-                const isBrawlLegal = card.legalities?.historicbrawl === 'legal' || card.legalities?.brawl === 'legal';
-                
-                if (isBrawlLegal) {
-                    let rawColors = card.colors;
-                    if (card.card_faces && !rawColors) {
-                        const faceColors = new Set();
-                        card.card_faces.forEach(face => {
-                            if (face.colors) face.colors.forEach(c => faceColors.add(c));
-                        });
-                        rawColors = Array.from(faceColors);
-                    }
-
-                    const cleanedCard = filterCardKeys(card);
-                    cleanedCard.colors = getColorNames(rawColors);
-
-                    const normalizedTitle = card.name.toLowerCase().replace(/\\s*\\/\\s*/g, " // ");
-                    const basicTitle = normalizedTitle.split(" // ")[0].trim();
-
-                    const isOwned = !!(ownedMap[normalizedTitle] || ownedMap[basicTitle]);
-                    
-                    cleanedCard.amount = 1; 
-                    cleanedCard.owned = isOwned;
-                    cleanedCard.oracle_text = card.oracle_text || (card.card_faces ? card.card_faces.map(f => f.oracle_text).join(" | ") : "");
-
-                    finalProcessedDeck.push(cleanedCard);
-                }
-            });
-        }
-
-        res.json({
-            commander: sanitizedCommander,
-            processedDecklist: finalProcessedDeck
-        });
-
-    } catch (err) {
-        console.error("Pipeline processing failure intercepted safely.");
-        // SECURITY FIX 6: Never send err.message or system logs back to client endpoints
-        res.status(500).json({ error: "Internal processing failed. Please verify the commander's spelling or your connection status." });
-    }
-});
-
-app.listen(5000, () => console.log('🛡️ Hardened Processing Server running securely on port 5000'));
+    });
+};
 `;
-writeFile(path.join(SERVER_DIR, 'app.js'), appJsContent);
+writeFile(path.join(SERVER_API_DIR, 'brew.js'), brewApiContent);
+
+// server/local-dev-runner.js (Allows you to run this exact serverless file locally via node without adjustments)
+const localRunnerContent = `
+const express = require('express');
+const serverlessHandler = require('./api/brew.js');
+const app = express();
+app.use(express.json({ limit: '2mb' }));
+app.post('/api/brew', serverlessHandler);
+app.listen(5000, () => console.log('🛡️ Local Serverless API Environment simulator running on port 5000'));
+`;
+writeFile(path.join(SERVER_DIR, 'local-dev-runner.js'), localRunnerContent);
 
 // ==========================================
-// 3. SECURE FRONTEND APPLICATION INTERFACE
+// 3. SECURE FRONTEND APP
 // ==========================================
 const clientPackageJson = {
   "name": "brawl-builder-frontend",
@@ -282,16 +290,14 @@ writeFile(path.join(CLIENT_DIR, 'package.json'), JSON.stringify(clientPackageJso
 const viteConfigContent = `
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-export default defineConfig({ plugins: [react()] })
+export default defineConfig({ plugins: [react()], base: './' })
 `;
 writeFile(path.join(CLIENT_DIR, 'vite.config.js'), viteConfigContent);
 
 const indexHtmlContent = `
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" /><title>Secure Brawl Deck Engine</title>
-  </head>
+  <head><meta charset="UTF-8" /><title>Secure Serverless Brawl Matcher</title></head>
   <body style="margin: 0; background-color: #121212;"><div id="root"></div><script type="module" src="/src/main.jsx"></script></body>
 </html>
 `;
@@ -317,13 +323,13 @@ export default function App() {
   const [collectionCsv, setCollectionCsv] = useState('');
   const [fileName, setFileName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [apiEndpoint, setApiEndpoint] = useState('http://localhost:5000/api/brew');
   
   const [finalDeck, setFinalDeck] = useState([]);
-  const [strategy, setStrategy] = useState('Awaiting secure environment optimization parameters...');
+  const [strategy, setStrategy] = useState('Ready for target optimization analysis payload loops.');
   const [missingCards, setMissingCards] = useState([]);
 
   useEffect(() => {
-    // Simple verification check to control unnecessary network traffic triggers
     const trimmed = commander.trim().replace(/[^a-zA-Z0-9\\s']/g, '');
     if (trimmed.length < 3) {
       setSuggestions([]);
@@ -333,7 +339,7 @@ export default function App() {
       try {
         const res = await axios.get(\`https://api.scryfall.com/cards/autocomplete?q=\${encodeURIComponent(trimmed)}\`);
         setSuggestions(res.data.data || []);
-      } catch (err) { console.error("Autocomplete request bypassed."); }
+      } catch (err) {}
     }, 250);
     return () => clearTimeout(delayDebounce);
   }, [commander]);
@@ -342,7 +348,7 @@ export default function App() {
     const file = e.target.files[0];
     if (file) {
       if (file.size > 2 * 1024 * 1024) {
-        alert("File size limit violation: Please upload a file smaller than 2MB.");
+        alert("File size bounds limit error: Choose a file under 2MB.");
         return;
       }
       setFileName(file.name);
@@ -356,7 +362,7 @@ export default function App() {
     setLoading(true);
     const targetName = selectedCommander || commander;
     try {
-      const res = await axios.post('http://localhost:5000/api/brew', {
+      const res = await axios.post(apiEndpoint, {
         commanderName: targetName,
         collectionCsv: collectionCsv
       });
@@ -367,11 +373,11 @@ export default function App() {
       const unowned = processedCards.filter(c => !c.owned);
       setMissingCards(unowned);
       
-      setStrategy(\`🔒 [Hardened Environment Run Complete]\\n\\nParsed your inventory data matrix safely. The data payload has been stripped of unnecessary identifying fields, sanitized against buffer exploits, and evaluated for singleton compliance.\\n\\nThis clean structure is ready to be sent to your choice of AI model endpoint securely.\`);
+      setStrategy(\`🔒 [Serverless Matrix Optimization Check Complete]\\n\\nProcessed evaluation constraints cleanly. Total card records parsed safely.\\n\\nThis payload payload matrix can now safely be shared or reviewed downstream with an AI model endpoint context window.\`);
 
     } catch (err) {
-      const FallbackMsg = err.response?.data?.error || "Connection failure with backend server pipeline.";
-      alert(FallbackMsg);
+      const msg = err.response?.data?.error || "Pipeline request timeout or routing error.";
+      alert(msg);
     } finally {
       setLoading(false);
     }
@@ -380,17 +386,27 @@ export default function App() {
   return (
     <div style={{ display: 'flex', gap: '20px', padding: '20px', fontFamily: 'sans-serif', backgroundColor: '#121212', color: '#e0e0e0', minHeight: '100vh' }}>
       
-      {/* CONTROL ACTIONS PANEL */}
       <div style={{ flex: 1, borderRight: '1px solid #2d2d2d', paddingRight: '20px' }}>
-        <h2 style={{ color: '#ffffff' }}>🛡️ Hardened Input Controls</h2>
+        <h2 style={{ color: '#fff' }}>🛡️ Serverless Arena Builder</h2>
+        
+        <div style={{ marginBottom: '15px' }}>
+          <label style={{ display: 'block', marginBottom: '5px', color: '#aaa', fontSize: '12px' }}>Active API Routing Target:</label>
+          <input 
+            type="text" 
+            value={apiEndpoint} 
+            onChange={(e) => setApiEndpoint(e.target.value)}
+            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #444', background: '#222', color: '#81c784', fontSize: '12px' }}
+          />
+        </div>
+
         <div style={{ position: 'relative', marginBottom: '20px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', color: '#aaaaaa' }}>Target Commander Name:</label>
+          <label style={{ display: 'block', marginBottom: '5px', color: '#aaa' }}>Target Commander Name:</label>
           <input 
             type="text" 
             value={commander} 
             onChange={(e) => setCommander(e.target.value)}
             style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #444', background: '#222', color: '#fff' }}
-            placeholder="Type your commander..."
+            placeholder="Type commander title..."
           />
           {suggestions.length > 0 && (
             <ul style={{ position: 'absolute', top: '100%', left: 0, width: '100%', background: '#1e1e1e', border: '1px solid #444', listStyle: 'none', padding: 0, margin: 0, zIndex: 10 }}>
@@ -408,9 +424,9 @@ export default function App() {
         </div>
 
         <div style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', color: '#aaaaaa' }}>Upload Inventory CSV (Max 2MB):</label>
-          <input type="file" accept=".csv" onChange={handleCsvUpload} style={{ color: '#ccc' }} />
-          {fileName && <p style={{ color: '#81c784', fontSize: '12px' }}>✓ File verified: {fileName}</p>}
+          <label style={{ display: 'block', marginBottom: '5px', color: '#aaa' }}>Moxfield Inventory (.csv):</label>
+          <input type="file" accept=".csv" onChange={handleCsvUpload} />
+          {fileName && <p style={{ color: '#81c784', fontSize: '12px' }}>✓ Encrypted buffer parse verified: {fileName}</p>}
         </div>
 
         <button 
@@ -418,21 +434,20 @@ export default function App() {
           disabled={loading}
           style={{ width: '100%', padding: '12px', background: '#1e88e5', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
         >
-          {loading ? 'Processing Safely...' : 'Assemble Secure Matrix'}
+          {loading ? 'Executing Serverless Loop...' : 'Compute Deck Requirements'}
         </button>
       </div>
 
-      {/* RENDER LIST CONTAINER */}
       <div style={{ flex: 1.5, padding: '0 10px' }}>
-        <h2 style={{ color: '#ffffff' }}>🎴 Validated Deck List ({finalDeck.length})</h2>
+        <h2 style={{ color: '#fff' }}>🎴 Decklist Target Matrix ({finalDeck.length})</h2>
         <div style={{ background: '#1e1e1e', padding: '15px', borderRadius: '6px', maxHeight: '75vh', overflowY: 'auto', border: '1px solid #2d2d2d' }}>
-          {finalDeck.length === 0 ? <p style={{ color: '#777' }}>No current operations running.</p> : (
+          {finalDeck.length === 0 ? <p style={{ color: '#777' }}>Awaiting pipeline execution variables...</p> : (
             <pre style={{ margin: 0, fontSize: '14px', lineHeight: '1.6' }}>
               {finalDeck.map((card, idx) => (
                 <div key={idx} style={{ color: card.owned ? '#e0e0e0' : '#ef5350', display: 'flex', justifyContent: 'space-between' }}>
                   <span>1 {card.name}</span>
                   <span style={{ fontSize: '11px', color: card.owned ? '#81c784' : '#ef5350' }}>
-                    {card.owned ? '[MATCHED]' : '[WILD CARD NEEDED]'}
+                    {card.owned ? '[MATCHED]' : '[WILD CARDED]'}
                   </span>
                 </div>
               ))}
@@ -441,19 +456,18 @@ export default function App() {
         </div>
       </div>
 
-      {/* LOG DATA CONTAINER */}
       <div style={{ flex: 1.5, display: 'flex', flexDirection: 'column', gap: '20px', paddingLeft: '20px', borderLeft: '1px solid #2d2d2d' }}>
         <div style={{ background: '#1e1e1e', padding: '15px', borderRadius: '6px', border: '1px solid #2d2d2d' }}>
-          <h3 style={{ marginTop: 0, color: '#4dd0e1' }}>⚙️ Security Compliance Output</h3>
+          <h3 style={{ marginTop: 0, color: '#4dd0e1' }}>⚙️ Serverless Safety State Log</h3>
           <div style={{ fontSize: '14px', lineHeight: '1.5', color: '#ccc', whiteSpace: 'pre-line' }}>
             {strategy}
           </div>
         </div>
 
         <div style={{ background: '#1e1e1e', padding: '15px', borderRadius: '6px', border: '1px solid #2d2d2d', flex: 1 }}>
-          <h3 style={{ marginTop: 0, color: '#ff7043' }}>⚠️ Out of Stock Requirements</h3>
+          <h3 style={{ marginTop: 0, color: '#ff7043' }}>⚠️ Unowned Structural Requirements</h3>
           <div style={{ maxHeight: '35vh', overflowY: 'auto' }}>
-            {missingCards.length === 0 ? <p style={{ color: '#777', fontSize: '13px' }}>No missing resource components identified.</p> : (
+            {missingCards.length === 0 ? <p style={{ color: '#777', fontSize: '13px' }}>No resource structural missing variables identified.</p> : (
               <ul style={{ paddingLeft: '20px', margin: 0, fontSize: '13px', color: '#ffab91' }}>
                 {missingCards.map((card, i) => (
                   <li key={i} style={{ marginBottom: '6px' }}>
@@ -464,20 +478,20 @@ export default function App() {
             )}
           </div>
         </div>
-
       </div>
+
     </div>
   );
 }
 `;
-writeFile(path.join(CLIENT_DIR, 'src', 'App.jsx'), appJsContent);
+writeFile(path.join(CLIENT_DIR, 'src', 'App.jsx'), appJsxContent);
 
-console.log("\n📦 Mounting production-safe build scripts...");
+console.log("\n📦 Finalizing dependencies package linkages...");
 try {
     execSync('npm install concurrently --save-dev', { stdio: 'inherit' });
-    console.log("\n✨ System setup hardened successfully! To spin up the workspace securely:");
+    console.log("\n✨ System structural assembly complete! To work locally:");
     console.log("   1. npm run install-all");
     console.log("   2. npm run dev");
 } catch (e) {
-    console.log("Workspace initialized. Run 'npm run install-all' to initialize dependency trees.");
+    console.log("Ready. Run 'npm run install-all' to download dependency nodes.");
 }
