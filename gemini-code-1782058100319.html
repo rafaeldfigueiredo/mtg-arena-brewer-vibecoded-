@@ -178,7 +178,6 @@
         <h1>Deck Seeker</h1>
         
         <div class="workspace">
-            <!-- LEFT PANEL: Input Operations -->
             <div class="section-panel">
                 <div class="section-title">Input Options</div>
                 <label class="file-dropzone" id="dropzone">
@@ -188,12 +187,11 @@
 
                 <div class="divider">OR</div>
 
-                <textarea id="pasteInput" placeholder="Paste your raw decklist here...&#10;e.g.&#10;1 Arnyn, Deathbloom Botanist (SOS) 74&#10;36 Swamp (FIN) 300"></textarea>
+                <textarea id="pasteInput" placeholder="Paste your raw decklist here...&#10;e.g.&#10;1 Swordsman, Sharp Scoundrel&#10;38 Swamp"></textarea>
             </div>
 
-            <!-- RIGHT PANEL: Descriptive Export Layout -->
             <div class="section-panel">
-                <div class="section-title">Descriptive Decklist Output</div>
+                <div class="section-title">Gameplay Only Decklist Output</div>
                 <textarea id="decklistOutput" class="output-display" readonly placeholder="Parsed analytical JSON output will populate here step-by-step..."></textarea>
                 
                 <div class="action-group">
@@ -317,31 +315,35 @@
             return { deckName, deckItems };
         }
 
-        function getColorNames(colorCodes) {
-            if (!colorCodes || colorCodes.length === 0) return ["Colorless"];
-            const mapping = { "W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green" };
-            return colorCodes.map(c => mapping[c] || c);
-        }
+        // NEW: Strictly Whitelist Gameplay Elements
+        function extractGameplayData(card) {
+            const cleaned = {
+                name: card.name || "",
+                mana_cost: card.mana_cost || "",
+                cmc: card.cmc !== undefined ? card.cmc : 0,
+                type_line: card.type_line || "",
+                oracle_text: card.oracle_text || "",
+                color_identity: card.color_identity || []
+            };
 
-        function filterCardKeys(data) {
-            if (data && typeof data === 'object' && !Array.isArray(data)) {
-                const cleaned = {};
-                const skipTerms = ['uri', 'url', 'set', 'flavor', 'stamp', 'promo'];
-                const skipExact = ['object', 'lang', 'layout', 'legalities', 'id', 'nonfoil', 'foil', 'finishes', 'oversized', 'booster', 'textless', 'full_art', 'frame', 'frame_effects', 'border_color', 'highres_image', 'image_status', 'prices', 'artist', 'released_at', 'digital', 'collector_number', 'games', 'preview', 'story_spotlight', 'reprint', 'variation'];
+            // Only add combat parameters if they are explicitly part of the card type ruleset
+            if (card.power !== undefined) cleaned.power = card.power;
+            if (card.toughness !== undefined) cleaned.toughness = card.toughness;
 
-                for (const [k, v] of Object.entries(data)) {
-                    const kLower = k.toLowerCase();
-                    
-                    if (skipTerms.some(term => kLower.includes(term))) continue;
-                    if (skipExact.includes(kLower) || kLower.endsWith('_id') || kLower.endsWith('_ids')) continue;
-
-                    cleaned[k] = filterCardKeys(v);
+            // Integrity fallback for split cards or double-faced cards where text/costs exist inside card_faces
+            if (card.card_faces && card.card_faces.length > 0) {
+                if (!cleaned.oracle_text) {
+                    cleaned.oracle_text = card.card_faces.map(face => `${face.name}: ${face.oracle_text || ""}`).join("\n\n");
                 }
-                return cleaned;
-            } else if (Array.isArray(data)) {
-                return data.map(item => filterCardKeys(item));
+                if (!cleaned.mana_cost) {
+                    cleaned.mana_cost = card.card_faces.map(face => face.mana_cost || "").join(" // ");
+                }
+                if (!cleaned.type_line) {
+                    cleaned.type_line = card.card_faces.map(face => face.type_line || "").join(" // ");
+                }
             }
-            return data;
+
+            return cleaned;
         }
 
         async function processDecklist(fileContent) {
@@ -386,20 +388,8 @@
                 const cardDataArray = resData.data || [];
 
                 for (const card of cardDataArray) {
-                    let rawColors = card.colors;
-                    
-                    if (card.card_faces) {
-                        const faceColors = new Set();
-                        card.card_faces.forEach(face => {
-                            if (face.colors) face.colors.forEach(c => faceColors.add(c));
-                        });
-                        if ((!rawColors || rawColors.length === 0) && faceColors.size > 0) {
-                            rawColors = Array.from(faceColors);
-                        }
-                    }
-
-                    const cleanedCard = filterCardKeys(card);
-                    cleanedCard.colors = getColorNames(rawColors);
+                    // Filter down instantly to gameplay properties
+                    const cleanedCard = extractGameplayData(card);
 
                     const cardTitle = (card.name || "").toLowerCase().replace(/\//g, "//").replace(/\/\/\/\//g, "//");
                     const baseName = cardTitle.split(" // ")[0];
@@ -416,11 +406,10 @@
 
             processedJsonResult = finalJsonOutput;
             
-            // Render structured JSON directly into the right-hand view box
             decklistOutput.value = JSON.stringify(processedJsonResult, null, 4);
             
             statusMessage.style.color = "#04d361";
-            statusMessage.textContent = `✅ Success! Built lookup mapping with ${finalJsonOutput.length - 1} records.`;
+            statusMessage.textContent = `✅ Success! Built clean lookup mapping with ${finalJsonOutput.length - 1} records.`;
             toggleActionButtons(false);
         }
 
